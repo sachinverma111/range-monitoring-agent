@@ -1,0 +1,51 @@
+product_id,product_name,category,brand,range_tag,season,price
+P001,Classic Leather Derby,Footwear,Clarks,continuity,,89.99
+P002,Chelsea Boot Tan,Footwear,Clarks,seasonal,AW25,119.99
+P003,White Trainer Low,Footwear,Nike,continuity,,65.00
+P004,Running Shoe Pro,Footwear,Nike,continuity,,95.00
+P005,Sandal Strappy,Footwear,Birkenstock,seasonal,SS25,55.00
+P006,Hiking Boot Waterproof,Footwear,Merrell,continuity,,145.00
+P007,Loafer Suede,Footwear,Tod's,continuity,,135.00
+P008,Platform Sneaker,Footwear,New Balance,continuity,,85.00
+P009,Ankle Boot Block Heel,Footwear,Steve Madden,seasonal,AW25,99.00
+P010,Slipper Memory Foam,Footwear,UGG,continuity,,45.00
+P011,Oxford Brogue,Footwear,Dr. Martens,continuity,,110.00
+P012,Canvas Plimsoll,Footwear,Vans,continuity,,55.00
+P013,Mule Leather,Footwear,Birkenstock,seasonal,SS25,75.00
+P014,Sport Sandal,Footwear,Teva,seasonal,SS25,60.00
+P015,Winter Boot Fur,Footwear,UGG,seasonal,AW25,185.00
+P016,Floral Midi Dress,Womenswear,Monsoon,seasonal,SS25,79.99
+P017,Slim Fit Chino,Menswear,Chinos & Co,continuity,,49.99
+P018,Wool Blend Coat,Womenswear,M&S,seasonal,AW25,149.99
+P019,Striped Breton Top,Womenswear,Boden,continuity,,39.99
+P020,Linen Shirt Men,Menswear,Reiss,seasonal,SS25,89.99
+P021,Cashmere Jumper,Womenswear,John Lewis,seasonal,AW25,120.00
+P022,Denim Jacket,Menswear,Levi's,continuity,,95.00
+P023,Floral Blouse,Womenswear,Zara,seasonal,SS25,39.99
+P024,Formal Trousers,Menswear,Next,continuity,,55.00
+P025,Puffer Jacket,Womenswear,The North Face,seasonal,AW25,199.99
+P026,Yoga Leggings,Sportswear,Lululemon,continuity,,85.00
+P027,Running Shorts,Sportswear,Nike,continuity,,35.00
+P028,Sports Bra,Sportswear,Under Armour,continuity,,45.00
+P029,Cycling Jersey,Sportswear,Rapha,seasonal,SS25,110.00
+P030,Swim Shorts,Sportswear,Speedo,seasonal,SS25,30.00
+P031,Gym T-Shirt,Sportswear,Adidas,continuity,,25.00
+P032,Winter Running Jacket,Sportswear,Nike,seasonal,AW25,95.00
+P033,Compression Socks,Sportswear,2XU,continuity,,25.00
+P034,Trail Running Shoe,Sportswear,Salomon,continuity,,130.00
+P035,Swim Goggles,Sportswear,Speedo,continuity,,30.00
+P036,Leather Crossbody Bag,Accessories,Coach,continuity,,195.00
+P037,Canvas Tote,Accessories,L.L.Bean,continuity,,45.00
+P038,Silk Scarf,Accessories,Mulberry,seasonal,AW25,85.00
+P039,Leather Wallet,Accessories,Bellroy,continuity,,65.00
+P040,Baseball Cap,Accessories,New Era,continuity,,35.00
+P041,Wool Beanie,Accessories,Patagonia,seasonal,AW25,40.00
+P042,Sunglasses Wayfarer,Accessories,Ray-Ban,seasonal,SS25,135.00
+P043,Leather Belt,Accessories,Montblanc,continuity,,75.00
+P044,Backpack Urban,Accessories,Herschel,continuity,,85.00
+P045,Jewellery Set,Accessories,Pandora,continuity,,95.00
+P046,Smart Watch,Electronics,Apple,continuity,,399.00
+P047,Wireless Earbuds,Electronics,Sony,continuity,,149.00
+P048,Phone Case Premium,Electronics,Casetify,continuity,,45.00
+P049,Portable Charger,Electronics,Anker,continuity,,39.99
+P050,Laptop Sleeve,Electronics,Incase,continuity,,55.00

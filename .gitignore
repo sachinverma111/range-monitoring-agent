@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Output
+output/
+
+# Customer data — never commit real data
+customer_data/
+
+# Streamlit
+.streamlit/credentials.toml
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/

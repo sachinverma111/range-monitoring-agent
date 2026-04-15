@@ -1,0 +1,37 @@
+# Range Monitoring Agent — Default Configuration
+# Override any of these values in a customer-specific config file.
+
+# Rule 1: Online/In-Store Rank Mismatch → RANGE_GAP
+# Products with a rank delta >= this value (percentile points) will be flagged.
+rank_mismatch_threshold: 30.0
+
+# Rule 2: Slow Mover → SLOW_MOVER
+# Products with sell-through below this rate over the rolling window are flagged.
+slow_mover_sell_through: 0.10
+slow_mover_window_weeks: 4
+
+# Rule 3: Seasonal Misclassification → SEASON_MISMATCH
+# Products tagged seasonal that have this many weeks of out-of-season online sales.
+seasonal_consistency_weeks: 6
+
+# Rule 4: Category Divergence → CATEGORY_DIVERGENCE
+# A category must underperform in-store at >= this fraction of locations to be flagged.
+category_underperformance_pct: 0.30
+
+# Rule 5: Stock Imbalance → STOCK_IMBALANCE
+# Flag locations with weeks-of-cover >= this multiple of the median across peer locations.
+stock_imbalance_multiple: 2.0
+
+# Noise filter: minimum online units sold for a product to enter analysis
+min_units_threshold: 5
+
+# Maximum number of ranked insights to include in the output report
+top_insights_count: 20
+
+# Which rules to run (remove any to disable)
+enabled_rules:
+  - rank_mismatch
+  - slow_mover
+  - season_mismatch
+  - category_divergence
+  - stock_imbalance
