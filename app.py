@@ -362,6 +362,7 @@ if run_clicked:
             return _save_upload(uploaded)
         return None
 
+    total_seasonal_products = 0
     with st.spinner("Agent is scanning your range data…"):
         try:
             if use_sample:
@@ -379,6 +380,10 @@ if run_clicked:
             insights = run_analysis(products, online_sales, store_sales, calendar, config)
             insights = build_narratives(insights)
 
+            # Count seasonal products for misclassification rate KPI
+            if "range_tag" in products.columns:
+                total_seasonal_products = int((products["range_tag"] == "seasonal").sum())
+
         except (FileNotFoundError, ValueError) as exc:
             st.error(f"Data error: {exc}")
             st.stop()
@@ -390,10 +395,10 @@ if run_clicked:
     # ── Report ───────────────────────────────────────────────────────────
     st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
 
-    html_report = render_html_report(insights, config)
+    html_report = render_html_report(insights, config, total_seasonal_products=total_seasonal_products)
 
     import streamlit.components.v1 as components
-    components.html(html_report, height=960, scrolling=True)
+    components.html(html_report, height=1800, scrolling=True)
 
     # ── Downloads ────────────────────────────────────────────────────────
     st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)

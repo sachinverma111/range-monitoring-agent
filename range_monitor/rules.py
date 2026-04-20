@@ -49,6 +49,9 @@ def rank_mismatch(
         .rank(pct=True) * 100
     )
 
+    # Count products per category for rank display (e.g. "#3 of 120")
+    category_counts = online_agg.groupby("category")["product_id"].count().to_dict()
+
     # --- Store: aggregate total units per product × location, rank within category × location ---
     store_agg = (
         store_sales
@@ -84,6 +87,13 @@ def rank_mismatch(
 
     insights = []
     for _, row in flagged.iterrows():
+        cat = row["category"]
+        cat_n = category_counts.get(cat, 0)
+        online_pct = round(row["online_pct_rank"], 1)
+        store_pct = round(row["store_pct_rank"], 1)
+        # Absolute rank positions: rank 1 = best (highest pct_rank)
+        online_rank_num = min(cat_n, int((1 - online_pct / 100) * cat_n) + 1) if cat_n > 0 else 0
+        store_rank_num = min(cat_n, int((1 - store_pct / 100) * cat_n) + 1) if cat_n > 0 else 0
         insights.append(Insight(
             insight_type="RANGE_GAP",
             product_id=row["product_id"],
@@ -96,13 +106,74 @@ def rank_mismatch(
             supporting_data={
                 "online_units": int(row["online_units"]),
                 "store_units": int(row["store_units"]),
-                "online_pct_rank": round(row["online_pct_rank"], 1),
-                "store_pct_rank": round(row["store_pct_rank"], 1),
+                "online_pct_rank": online_pct,
+                "store_pct_rank": store_pct,
                 "rank_delta": round(row["rank_delta"], 1),
                 "best_peer_pct_rank": round(row.get("best_peer_pct_rank", 0), 1),
                 "price": float(row["price"]) if pd.notna(row.get("price")) else None,
+                "category_product_count": cat_n,
+                "online_rank_num": online_rank_num,
+                "store_rank_num": store_rank_num,
             },
         ))
+
+    # --- Missing from range: top-5% online products absent from stores that carry the category ---
+    top_online = online_agg[online_agg["online_pct_rank"] >= 95].copy()
+    if not top_online.empty:
+        # Stores that actively carry each category (≥5 products in that category)
+        # store_agg already has category from the earlier merge
+        store_cat_presence = (
+            store_agg.groupby(["location_id", "category"])["product_id"]
+            .count()
+            .reset_index(name="cat_count")
+        )
+        store_cat_presence = store_cat_presence[store_cat_presence["cat_count"] >= 5][["location_id", "category"]]
+
+        # Cross-join top products × stores where that category exists
+        top_pids = top_online["product_id"].tolist()
+        store_has_product = (
+            store_agg[store_agg["product_id"].isin(top_pids)][["product_id", "location_id"]]
+            .drop_duplicates()
+            .copy()
+        )
+        store_has_product["_present"] = True
+
+        expected = top_online[["product_id", "category", "product_name", "online_units", "online_pct_rank", "price"]].merge(
+            store_cat_presence, on="category", how="inner"
+        )
+        missing = expected.merge(store_has_product, on=["product_id", "location_id"], how="left")
+        missing = missing[missing["_present"].isna()].drop("_present", axis=1)
+        missing = missing.nlargest(20, "online_pct_rank")
+
+        for _, row in missing.iterrows():
+            cat = row["category"]
+            cat_n = category_counts.get(cat, 0)
+            online_pct = round(row["online_pct_rank"], 1)
+            online_rank_num = min(cat_n, int((1 - online_pct / 100) * cat_n) + 1) if cat_n > 0 else 0
+            insights.append(Insight(
+                insight_type="RANGE_GAP",
+                product_id=row["product_id"],
+                product_name=row["product_name"],
+                category=row["category"],
+                location_id=row["location_id"],
+                score=0.0,
+                narrative="",
+                recommended_action=f"Add {row['product_name']} to the range at store {row['location_id']} — it is currently absent while ranking #{online_rank_num:,} of {cat_n:,} in its category online.",
+                supporting_data={
+                    "online_units": int(row["online_units"]),
+                    "store_units": 0,
+                    "online_pct_rank": online_pct,
+                    "store_pct_rank": 0.0,
+                    "rank_delta": online_pct,
+                    "best_peer_pct_rank": 0.0,
+                    "price": float(row["price"]) if pd.notna(row.get("price")) else None,
+                    "category_product_count": cat_n,
+                    "online_rank_num": online_rank_num,
+                    "store_rank_num": cat_n,  # worst possible in-store rank
+                    "is_missing_from_range": True,
+                },
+            ))
+
     return insights
 
 
@@ -216,67 +287,106 @@ def season_mismatch(
     config: AnalysisConfig,
 ) -> list[Insight]:
     """
-    Detect products tagged as seasonal that have consistent online sales
-    outside their designated season window — a strong signal that they
-    should be reclassified as continuity.
+    Detect two types of seasonal misclassification:
+    1. Seasonal → Continuity: products tagged seasonal that sell consistently outside season.
+    2. Continuity → Seasonal: products tagged continuity with highly concentrated seasonal peaks.
     """
-    if calendar is None or calendar.empty:
-        return []
-
-    # Only seasonal products with a defined window
-    seasonal_cal = calendar.dropna(subset=["active_from", "active_to"])
-    if seasonal_cal.empty:
-        return []
-
-    seasonal_products = products[products["range_tag"] == "seasonal"].copy()
-    if seasonal_products.empty:
-        return []
-
-    # Join products → calendar on range_tag + season
-    sp = seasonal_products.merge(
-        seasonal_cal[["range_tag", "season", "active_from", "active_to"]],
-        on=["range_tag", "season"],
-        how="inner",
-    )
-
-    # Join online sales
-    sales = online_sales.merge(sp[["product_id", "product_name", "category", "season", "active_from", "active_to"]], on="product_id", how="inner")
-
-    # Flag sales weeks that fall outside [active_from, active_to]
-    sales["out_of_season"] = ~(
-        (sales["period"] >= sales["active_from"]) & (sales["period"] <= sales["active_to"])
-    )
-    sales_with_units = sales[sales["units_sold"] >= config.min_units_threshold]
-
-    out_of_season_counts = (
-        sales_with_units[sales_with_units["out_of_season"]]
-        .groupby(["product_id", "product_name", "category", "season", "active_from", "active_to"])
-        .size()
-        .reset_index(name="out_of_season_weeks")
-    )
-
-    flagged = out_of_season_counts[
-        out_of_season_counts["out_of_season_weeks"] >= config.seasonal_consistency_weeks
-    ]
-
     insights = []
-    for _, row in flagged.iterrows():
-        insights.append(Insight(
-            insight_type="SEASON_MISMATCH",
-            product_id=row["product_id"],
-            product_name=row["product_name"],
-            category=row["category"],
-            location_id=None,
-            score=0.0,
-            narrative="",
-            recommended_action=f"Reclassify {row['product_name']} from seasonal ({row['season']}) to continuity range to avoid unnecessary stock drops at season end.",
-            supporting_data={
-                "season": row["season"],
-                "season_window": f"{row['active_from'].date()} to {row['active_to'].date()}",
-                "out_of_season_selling_weeks": int(row["out_of_season_weeks"]),
-                "threshold_weeks": config.seasonal_consistency_weeks,
-            },
-        ))
+
+    # --- Forward detection: seasonal → continuity ---
+    if calendar is not None and not calendar.empty:
+        seasonal_cal = calendar.dropna(subset=["active_from", "active_to"])
+        if not seasonal_cal.empty and "range_tag" in products.columns:
+            seasonal_products = products[products["range_tag"] == "seasonal"].copy()
+            if not seasonal_products.empty:
+                sp = seasonal_products.merge(
+                    seasonal_cal[["range_tag", "season", "active_from", "active_to"]],
+                    on=["range_tag", "season"],
+                    how="inner",
+                )
+                sales = online_sales.merge(
+                    sp[["product_id", "product_name", "category", "season", "active_from", "active_to"]],
+                    on="product_id", how="inner",
+                )
+                sales["out_of_season"] = ~(
+                    (sales["period"] >= sales["active_from"]) & (sales["period"] <= sales["active_to"])
+                )
+                sales_with_units = sales[sales["units_sold"] >= config.min_units_threshold]
+                out_of_season_counts = (
+                    sales_with_units[sales_with_units["out_of_season"]]
+                    .groupby(["product_id", "product_name", "category", "season", "active_from", "active_to"])
+                    .size()
+                    .reset_index(name="out_of_season_weeks")
+                )
+                flagged = out_of_season_counts[
+                    out_of_season_counts["out_of_season_weeks"] >= config.seasonal_consistency_weeks
+                ]
+                for _, row in flagged.iterrows():
+                    oos_wks = int(row["out_of_season_weeks"])
+                    insights.append(Insight(
+                        insight_type="SEASON_MISMATCH",
+                        product_id=row["product_id"],
+                        product_name=row["product_name"],
+                        category=row["category"],
+                        location_id=None,
+                        score=0.0,
+                        narrative="",
+                        recommended_action=f"Reclassify {row['product_name']} from seasonal ({row['season']}) to continuity range to avoid unnecessary stock drops at season end.",
+                        supporting_data={
+                            "direction": "seasonal_to_continuity",
+                            "season": row["season"],
+                            "season_window": f"{row['active_from'].date()} to {row['active_to'].date()}",
+                            "out_of_season_selling_weeks": oos_wks,
+                            "threshold_weeks": config.seasonal_consistency_weeks,
+                        },
+                    ))
+
+    # --- Reverse detection: continuity → seasonal ---
+    if "range_tag" in products.columns:
+        continuity_prods = products[
+            products["range_tag"].str.lower() == "continuity"
+        ][["product_id", "product_name", "category"]].copy()
+
+        if not continuity_prods.empty:
+            cont_sales = online_sales.merge(continuity_prods, on="product_id", how="inner")
+            if not cont_sales.empty:
+                totals = cont_sales.groupby("product_id")["units_sold"].sum()
+                for pid, grp in cont_sales.groupby("product_id"):
+                    total = totals.get(pid, 0)
+                    if total < config.min_units_threshold * 4:
+                        continue
+                    weekly = (
+                        grp.sort_values("period")
+                        .set_index("period")["units_sold"]
+                        .resample("W")
+                        .sum()
+                    )
+                    if len(weekly) < 8:
+                        continue
+                    rolling_sum = weekly.rolling(8, min_periods=4).sum()
+                    max_window_sum = rolling_sum.max()
+                    if total > 0 and (max_window_sum / total) >= 0.70:
+                        peak_pct = round(float(max_window_sum) / total * 100, 1)
+                        prod_info = continuity_prods[continuity_prods["product_id"] == pid].iloc[0]
+                        insights.append(Insight(
+                            insight_type="SEASON_MISMATCH",
+                            product_id=pid,
+                            product_name=prod_info["product_name"],
+                            category=prod_info["category"],
+                            location_id=None,
+                            score=0.0,
+                            narrative="",
+                            recommended_action=f"Review {prod_info['product_name']} range tag — concentrated seasonal peak ({peak_pct:.0f}% in 8 weeks) suggests it should be classified as seasonal for forward planning.",
+                            supporting_data={
+                                "direction": "continuity_to_seasonal",
+                                "peak_window_pct": peak_pct,
+                                "out_of_season_selling_weeks": 0,
+                                "threshold_weeks": config.seasonal_consistency_weeks,
+                                "season": "continuity",
+                                "season_window": "—",
+                            },
+                        ))
+
     return insights
 
 

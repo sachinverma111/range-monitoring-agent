@@ -42,11 +42,18 @@ def _score_insight(insight: Insight) -> float:
     if insight.insight_type == "RANGE_GAP":
         # rank_delta is 0–100; normalise to 0–1
         magnitude = min(d.get("rank_delta", 0) / 100.0, 1.0)
-        # Revenue opportunity: difference in units × price
-        online_rate = d.get("online_units", 0)
+        # Revenue opportunity: rank-improvement-based estimate (avoids the global vs
+        # per-store unit comparison that produces inflated numbers)
+        rank_delta = d.get("rank_delta", 0)
         store_units = d.get("store_units", 0)
         price = d.get("price") or 0
-        revenue_opp = max(0, (online_rate - store_units)) * price
+        if d.get("is_missing_from_range"):
+            # Product absent from store entirely: estimate 8% of online volume per store
+            revenue_opp = d.get("online_units", 0) * 0.08 * price
+        else:
+            # Underperforming: uplift proportional to rank gap, capped at 4× current sales
+            uplift = min(rank_delta / 25.0, 4.0)
+            revenue_opp = store_units * uplift * price
 
     elif insight.insight_type == "SLOW_MOVER":
         # Magnitude: how far below threshold is the sell-through?
@@ -56,10 +63,15 @@ def _score_insight(insight: Insight) -> float:
         revenue_opp = d.get("capital_at_risk_gbp", 0)
 
     elif insight.insight_type == "SEASON_MISMATCH":
-        # Magnitude: weeks over-season vs threshold
-        oos_weeks = d.get("out_of_season_selling_weeks", 0)
-        threshold = d.get("threshold_weeks", 6)
-        magnitude = min(oos_weeks / max(threshold * 2, 1), 1.0)
+        direction = d.get("direction", "seasonal_to_continuity")
+        if direction == "continuity_to_seasonal":
+            # Magnitude: how concentrated the peak is (0.7 → 1.0 maps to 0–1)
+            peak_pct = d.get("peak_window_pct", 70) / 100
+            magnitude = min((peak_pct - 0.70) / 0.30, 1.0)  # 70% = 0, 100% = 1
+        else:
+            oos_weeks = d.get("out_of_season_selling_weeks", 0)
+            threshold = d.get("threshold_weeks", 6)
+            magnitude = min(oos_weeks / max(threshold * 2, 1), 1.0)
         revenue_opp = 0  # hard to quantify without reclassification model
 
     elif insight.insight_type == "CATEGORY_DIVERGENCE":
@@ -95,6 +107,9 @@ def score_and_rank(insights: list[Insight]) -> list[Insight]:
         m, r = _score_insight(ins)
         magnitudes.append(m)
         rev_opps.append(r)
+        # Store revenue opportunity in supporting_data so delivery layer can read it directly
+        if ins.insight_type == "RANGE_GAP":
+            ins.supporting_data["revenue_opportunity_gbp"] = round(r, 2)
 
     norm_rev = _normalise(rev_opps)
 

@@ -90,6 +90,12 @@ ACTION_SECTIONS = [
 def _one_liner(ins: Insight) -> str:
     d = ins.supporting_data
     if ins.insight_type == "RANGE_GAP":
+        if d.get("is_missing_from_range"):
+            online = d.get("online_units", 0)
+            n = d.get("category_product_count", 0)
+            online_r = d.get("online_rank_num", 0)
+            rank_str = f"#{online_r:,}/{n:,}" if n > 0 and online_r > 0 else f"top {max(1, round(100 - d.get('online_pct_rank', 0)))}%"
+            return f"{rank_str} online ({online:,} units) — not in range at this store"
         online = d.get("online_units", 0)
         store = d.get("store_units", 0)
         return f"{online:,} units online vs {store:,} in-store — ranging or stock gap"
@@ -100,6 +106,10 @@ def _one_liner(ins: Insight) -> str:
         suffix = "location issue, not product" if loc_specific else "weak product — consider exit"
         return f"{st:.1f}% sell-through on {soh:.0f} units — {suffix}"
     if ins.insight_type == "SEASON_MISMATCH":
+        direction = d.get("direction", "seasonal_to_continuity")
+        if direction == "continuity_to_seasonal":
+            peak_pct = d.get("peak_window_pct", 0)
+            return f"{peak_pct:.0f}% of online sales in 8-week peak — tagged continuity but behaves seasonally"
         oos = d.get("out_of_season_selling_weeks", 0)
         season = d.get("season", "")
         return f"{oos} weeks of sales outside {season} window — reclassify to continuity"
@@ -118,9 +128,7 @@ def _one_liner(ins: Insight) -> str:
 def _impact_str(ins: Insight) -> str:
     d = ins.supporting_data
     if ins.insight_type == "RANGE_GAP":
-        price = d.get("price") or 0
-        gap = max(0, d.get("online_units", 0) - d.get("store_units", 0))
-        opp = round(gap * price * 0.3)
+        opp = round(d.get("revenue_opportunity_gbp", 0))
         return f"~£{opp:,} opp." if opp > 0 else "—"
     if ins.insight_type == "SLOW_MOVER":
         cap = d.get("capital_at_risk_gbp", 0)
@@ -141,6 +149,11 @@ def _specific_action(ins: Insight) -> str:
     loc = ins.location_id or "affected stores"
 
     if ins.insight_type == "RANGE_GAP":
+        if d.get("is_missing_from_range"):
+            n = d.get("category_product_count", 0)
+            online_r = d.get("online_rank_num", 0)
+            rank_str = f"#{online_r:,} of {n:,}" if n > 0 and online_r > 0 else f"top {max(1, round(100 - d.get('online_pct_rank', 0)))}%"
+            return f"Add {name} to the range at {loc} — it is completely absent while ranking {rank_str} in its category online."
         return f"Check ranging and increase stock allocation for {name} at {loc}."
 
     if ins.insight_type == "SLOW_MOVER":
@@ -151,7 +164,10 @@ def _specific_action(ins: Insight) -> str:
             return f"Consider markdown to clear ~{soh:.0f} units of {name} at {loc}, or remove from range at next review."
 
     if ins.insight_type == "SEASON_MISMATCH":
+        direction = d.get("direction", "seasonal_to_continuity")
         season = d.get("season", "current season")
+        if direction == "continuity_to_seasonal":
+            return f"Review {name} range tag — concentrated seasonal peak suggests it should be classified as seasonal for forward buying and range planning."
         return f"Reclassify {name} from {season} seasonal to continuity in the product master."
 
     if ins.insight_type == "STOCK_IMBALANCE":
@@ -174,17 +190,26 @@ def _narrative_range_gap(ins: Insight) -> str:
     d = ins.supporting_data
     online_units = d.get("online_units", 0)
     store_units = d.get("store_units", 0)
-    price = d.get("price") or 0
-    gap = max(0, online_units - store_units)
-    opp = round(gap * price * 0.3)
+    opp = round(d.get("revenue_opportunity_gbp", 0))
     peer_pct = d.get("best_peer_pct_rank", 0)
-    multiple = round(online_units / max(store_units, 1))
+    online_pct = d.get("online_pct_rank", 0)
+    opp_line = f" Adding this product could generate ~£{opp:,} in incremental sales." if opp > 0 else ""
 
+    if d.get("is_missing_from_range"):
+        n = d.get("category_product_count", 0)
+        online_r = d.get("online_rank_num", 0)
+        rank_str = f"#{online_r:,} of {n:,}" if n > 0 and online_r > 0 else f"top {max(1, round(100 - online_pct))}%"
+        return (
+            f"{ins.product_name} is not in the range at {ins.location_id} at all, "
+            f"yet it ranks {rank_str} in its category online with {online_units:,} units sold.{opp_line}"
+        )
+
+    multiple = round(online_units / max(store_units, 1))
     peer_line = (
         f" Your best-performing store sells {multiple}× more of this product, confirming the demand is real."
         if peer_pct >= 70 and multiple >= 2 else ""
     )
-    opp_line = f" Closing a third of this gap could recover ~£{opp:,}." if opp > 0 else ""
+    opp_line = f" Closing this gap could add ~£{opp:,} at this store." if opp > 0 else ""
 
     return (
         f"Online, {ins.product_name} is selling {online_units:,} units — but {ins.location_id} "
@@ -217,10 +242,20 @@ def _narrative_slow_mover(ins: Insight) -> str:
 
 def _narrative_season_mismatch(ins: Insight) -> str:
     d = ins.supporting_data
+    direction = d.get("direction", "seasonal_to_continuity")
+
+    if direction == "continuity_to_seasonal":
+        peak_pct = d.get("peak_window_pct", 0)
+        return (
+            f"{ins.product_name} is tagged as continuity, but {peak_pct:.0f}% of its online sales "
+            f"are concentrated in an 8-week peak window. "
+            f"A continuity classification assumes year-round demand, but the data shows a strong "
+            f"seasonal spike — which should influence range planning and forward buying decisions."
+        )
+
     season = d.get("season", "")
     window = d.get("season_window", "")
     oos_weeks = d.get("out_of_season_selling_weeks", 0)
-
     return (
         f"{ins.product_name} is tagged {season} seasonal (window: {window}), but has sold "
         f"online for {oos_weeks} weeks outside that window. "
@@ -283,12 +318,19 @@ def build_narratives(insights: list[Insight]) -> list[Insight]:
 
 def _context_table_range_gap(d: dict) -> list[tuple[str, str, str, str]]:
     price = d.get("price") or 0
-    gap = max(0, d.get("online_units", 0) - d.get("store_units", 0))
-    opp = round(gap * price * 0.3)
+    opp = round(d.get("revenue_opportunity_gbp", 0))
+    online_units = d.get("online_units", 0)
+    store_units = d.get("store_units", 0)
+    n = d.get("category_product_count", 0)
+    online_r = d.get("online_rank_num", "—")
+    store_r = d.get("store_rank_num", "—")
+    rank_str = f"#{online_r}/{n} online → #{store_r}/{n} in-store" if n > 0 else "—"
+    store_label = "Units at this store" if not d.get("is_missing_from_range") else "In-store presence"
+    store_val = f"{store_units:,}" if not d.get("is_missing_from_range") else "Not ranged"
     return [
-        ("Online units sold",    f"{d.get('online_units', 0):,}",          "Units at this store",  f"{d.get('store_units', 0):,}"),
-        ("Gap",                  f"{gap:,} units",                          "Est. sales opportunity", f"~£{opp:,}"),
-        ("Selling price",        f"£{price:,.2f}",                          "Best peer store rank", f"{d.get('best_peer_pct_rank', 0):.0f}th pctile"),
+        ("Online units sold",  f"{online_units:,}",   store_label,            store_val),
+        ("Rank position",      rank_str,               "Est. opportunity",     f"~£{opp:,}"),
+        ("Selling price",      f"£{price:,.2f}",       "Best peer store rank", f"{d.get('best_peer_pct_rank', 0):.0f}th pctile"),
     ]
 
 
@@ -303,6 +345,12 @@ def _context_table_slow_mover(d: dict) -> list[tuple[str, str, str, str]]:
 
 
 def _context_table_season_mismatch(d: dict) -> list[tuple[str, str, str, str]]:
+    direction = d.get("direction", "seasonal_to_continuity")
+    if direction == "continuity_to_seasonal":
+        return [
+            ("Classification",    "Continuity",                             "Peak window sales",  f"{d.get('peak_window_pct', 0):.0f}% in 8 weeks"),
+            ("Detection method",  "Rolling 8-week concentration",           "Trigger threshold",  "≥70% in peak window"),
+        ]
     return [
         ("Season tag",           d.get("season", "—"),                            "Season window",        d.get("season_window", "—")),
         ("Out-of-season weeks",  str(d.get("out_of_season_selling_weeks", 0)),     "Trigger threshold",    f"{d.get('threshold_weeks', 6)} weeks"),
@@ -386,8 +434,7 @@ def _executive_summary(insights: list[Insight]) -> str:
         for i in insights
     )
     total_opp = sum(
-        max(0, i.supporting_data.get("online_units", 0) - i.supporting_data.get("store_units", 0))
-        * (i.supporting_data.get("price") or 0) * 0.3
+        i.supporting_data.get("revenue_opportunity_gbp", 0)
         for i in insights if i.insight_type == "RANGE_GAP"
     )
 
